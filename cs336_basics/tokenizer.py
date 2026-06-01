@@ -215,6 +215,167 @@ class TokenSequenceRegister:
         self._validate()
 
 
+class Tokenizer:
+    """
+    A Byte Pair Encoding (BPE) tokenizer that supports special tokens.
+
+    This tokenizer pre-tokenizes text using the GPT-2 regex pattern, then
+    applies BPE merges in rank order. It also handles special tokens with
+    proper precedence (longest match first).
+    """
+
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        special_tokens: list[str] | None = None,
+    ):
+        """
+        Initialize the tokenizer with a vocabulary, merges, and special tokens.
+
+        Args:
+            vocab: Mapping from token IDs to their byte representations.
+            merges: List of (bytes, bytes) pairs representing BPE merges in rank order.
+            special_tokens: Optional list of special tokens to treat as atomic units.
+        """
+        self.vocab = vocab
+        self.merges = merges
+        self.special_tokens = special_tokens if special_tokens else []
+        self.byte_to_id = {v: k for k, v in vocab.items()}
+
+        if self.special_tokens:
+            # Sort special tokens by length descending to ensure "maximal munch" (match longest first)
+            sorted_specials = sorted(self.special_tokens, key=len, reverse=True)
+            self.special_pattern = re.compile(
+                "|".join(re.escape(t) for t in sorted_specials)
+            )
+        else:
+            self.special_pattern = None
+
+    def encode(self, text: str) -> list[int]:
+        """
+        Encode text into a list of token IDs.
+
+        Args:
+            text: Input string to encode.
+
+        Returns:
+            List of integer token IDs.
+        """
+        if not text:
+            return []
+
+        if not self.special_pattern:
+            return self._encode_non_special(text)
+
+        tokens = []
+        last_end = 0
+        for match in self.special_pattern.finditer(text):
+            # Segment before the special token
+            segment = text[last_end : match.start()]
+            if segment:
+                tokens.extend(self._encode_non_special(segment))
+
+            # The special token itself
+            special_token = match.group()
+            special_bytes = special_token.encode("utf-8")
+            if special_bytes in self.byte_to_id:
+                tokens.append(self.byte_to_id[special_bytes])
+
+            last_end = match.end()
+
+        # Segment after the last special token
+        segment = text[last_end:]
+        if segment:
+            tokens.extend(self._encode_non_special(segment))
+
+        return tokens
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:
+        """
+        Lazily encode an iterable of strings into token IDs.
+
+        Args:
+            iterable: An iterable yielding strings (e.g., a file handle).
+
+        Returns:
+            An iterable yielding integer token IDs.
+        """
+        for text in iterable:
+            yield from self.encode(text)
+
+    def decode(self, ids: list[int]) -> str:
+        """
+        Decode a list of token IDs back into a string.
+
+        Args:
+            ids: List of integer token IDs.
+
+        Returns:
+            The decoded string.
+        """
+        byte_seq = b"".join(self.vocab[idx] for idx in ids)
+        return byte_seq.decode("utf-8", errors="replace")
+
+    def _encode_non_special(self, text: str) -> list[int]:
+        """
+        Encode a segment of text that contains no special tokens.
+
+        Args:
+            text: Segment of text to encode.
+
+        Returns:
+            List of token IDs.
+        """
+        PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+        all_ids = []
+        for match in re.finditer(PAT, text):
+            pre_token = match.group(0)
+            all_ids.extend(self._encode_pre_token(pre_token))
+        return all_ids
+
+    def _encode_pre_token(self, pre_token: str) -> list[int]:
+        """
+        Encode a single pre-token into token IDs using BPE merges.
+
+        Args:
+            pre_token: A string representing a single pre-token.
+
+        Returns:
+            List of token IDs after applying merges.
+        """
+        byte_seq = pre_token.encode("utf-8")
+        ids = [self.byte_to_id[bytes([b])] for b in byte_seq]
+
+        if len(ids) <= 1:
+            return ids
+
+        seq = TokenSequence.from_tokens(
+            seq_id=0,
+            tokens=ids,
+            node_factory=lambda symbol_id, seq_id: TokenNode(symbol_id, seq_id),
+        )
+
+        for b1, b2 in self.merges:
+            id1 = self.byte_to_id.get(b1)
+            id2 = self.byte_to_id.get(b2)
+            if id1 is None or id2 is None:
+                continue
+
+            new_id = self.byte_to_id.get(b1 + b2)
+            if new_id is None:
+                continue
+
+            node = seq.head.next
+            while node is not seq.tail and node.next is not seq.tail:
+                if node.symbol_id == id1 and node.next.symbol_id == id2:
+                    _, node, _ = seq.merge_at(node, new_id)
+                else:
+                    node = node.next
+
+        return [node.symbol_id for node in seq]
+
+
 def find_chunk_boundaries(
     file: BinaryIO,
     desired_num_chunks: int,
