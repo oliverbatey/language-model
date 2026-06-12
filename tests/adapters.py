@@ -56,10 +56,9 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-    embedding_layer = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
-    embedding_layer.embedding_matrix = torch.nn.Parameter(weights)
-
-    return embedding_layer(token_ids)
+    layer = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+    layer.load_state_dict({"embedding_matrix": weights})
+    return layer(token_ids)
 
 
 def run_swiglu(
