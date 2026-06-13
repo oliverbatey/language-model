@@ -14,6 +14,8 @@ from cs336_basics.layers import (
     Embedding,
     Linear,
     RMSNorm,
+    SwiGLU,
+    RotaryPositionalEmbedding
 )
 
 
@@ -94,7 +96,11 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = SwiGLU(d_in=d_model, d_ff=d_ff)
+    swiglu.W1.W = torch.nn.Parameter(w1_weight)
+    swiglu.W2.W = torch.nn.Parameter(w2_weight)
+    swiglu.W3.W = torch.nn.Parameter(w3_weight)
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -211,7 +217,8 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    layer = RotaryPositionalEmbedding(theta=theta, d_k=d_k, max_seq_len=max_seq_len)
+    return layer(in_query_or_key, token_positions)
 
 
 def run_transformer_block(
