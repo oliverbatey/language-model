@@ -23,11 +23,7 @@ class Linear(torch.nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x.shape = (batch_size, sequence_length, d_model)
-        # W.shape = (d_out, d_in)
-        # We need sum over the third dimension of x which means we need d_model==d_in
-        Wt = rearrange(self.W, "d_model d_out -> d_out d_model")
-        return einsum(x, Wt, "... d_model, d_model d_out -> ... d_out")
+        return einsum(x, self.W, "... d_model, d_out d_model -> ... d_out")
 
 
 class Embedding(torch.nn.Module):
@@ -139,8 +135,13 @@ class RotaryPositionalEmbedding(torch.nn.Module):
 
         # Recombine pairs back into d_k
         x_rot = rearrange([x0_rot, x1_rot], "d_pair ... seq pair -> ... seq (pair d_pair)", d_pair=2)
-
         return x_rot
 
+class MultiHeadSelfAttention(torch.nn.Module):
+    def __init__(self, d_model: int, num_heads: int):
+        ...
+
+    def forward(x: torch.Tensor, mask: torch.Tensor | None=None) -> torch.Tensor:
+        ...
 
 
