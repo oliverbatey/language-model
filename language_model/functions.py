@@ -24,7 +24,7 @@ def scaled_dot_product_attention(Q, K, V, mask) -> torch.Tensor:
     QK_t = einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys")
     logits = QK_t / sqrt(K.shape[-1])
     if mask is not None:
-        logits = logits.masked_fill(~mask, float("-inf")) # False values should be masked and set to -inf, so invert mask
+        logits = logits.masked_fill(mask, float("-inf"))
     scores = softmax(logits, dim=-1)
     return einsum(scores, V, "... queries keys, ... keys d_v -> ... queries d_v")
 

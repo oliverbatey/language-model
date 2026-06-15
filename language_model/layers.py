@@ -1,7 +1,7 @@
 import torch
 from einops import einsum, rearrange, repeat
 from math import sqrt
-from language_model.functions import softmax
+from language_model.functions import softmax, scaled_dot_product_attention
 
 class Linear(torch.nn.Module):
     def __init__(self, d_in: int, d_out: int, device: torch.device | None=None, dtype: torch.dtype | None=None):
@@ -139,9 +139,20 @@ class RotaryPositionalEmbedding(torch.nn.Module):
 
 class MultiHeadSelfAttention(torch.nn.Module):
     def __init__(self, d_model: int, num_heads: int):
-        ...
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.W_qkv = Linear(d_in=d_model, d_out=3*d_model)
+        self.W_o = Linear(d_in=d_model, d_out=d_model)
 
-    def forward(x: torch.Tensor, mask: torch.Tensor | None=None) -> torch.Tensor:
-        ...
-
-
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        seq_len = x.shape[-2]
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device), diagonal=1)
+        y = self.W_qkv(x)
+        Q, K, V = y[..., :self.d_model], y[..., self.d_model:2*self.d_model], y[..., 2*self.d_model:3*self.d_model]
+        Q_multi = rearrange(Q, "batch seq (num_heads d_k) -> batch num_heads seq d_k", num_heads=self.num_heads)
+        K_multi = rearrange(K, "batch seq (num_heads d_k) -> batch num_heads seq d_k", num_heads=self.num_heads)
+        V_multi = rearrange(V, "batch seq (num_heads d_k) -> batch num_heads seq d_k", num_heads=self.num_heads)
+        scores = scaled_dot_product_attention(Q=Q_multi, K=K_multi, V=V_multi, mask=causal_mask)
+        multihead = rearrange(scores, "batch num_heads seq d_k -> batch seq (num_heads d_k)")
+        return self.W_o(multihead)
