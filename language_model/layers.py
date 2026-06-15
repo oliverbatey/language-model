@@ -138,21 +138,29 @@ class RotaryPositionalEmbedding(torch.nn.Module):
         return x_rot
 
 class MultiHeadSelfAttention(torch.nn.Module):
-    def __init__(self, d_model: int, num_heads: int):
+    def __init__(self, d_model: int, num_heads: int, max_seq_len: int | None = None, theta: float | None = None, device=None):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
-        self.W_qkv = Linear(d_in=d_model, d_out=3*d_model)
-        self.W_o = Linear(d_in=d_model, d_out=d_model)
+        self.W_qkv = Linear(d_in=d_model, d_out=3*d_model, device=device)
+        self.W_o = Linear(d_in=d_model, d_out=d_model, device=device)
+        if max_seq_len is not None and theta is not None:
+            self.rope = RotaryPositionalEmbedding(theta=theta, d_k=d_model//num_heads, max_seq_len=max_seq_len, device=device)
+        else:
+            self.rope = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         seq_len = x.shape[-2]
         causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device), diagonal=1)
         y = self.W_qkv(x)
         Q, K, V = y[..., :self.d_model], y[..., self.d_model:2*self.d_model], y[..., 2*self.d_model:3*self.d_model]
-        Q_multi = rearrange(Q, "batch seq (num_heads d_k) -> batch num_heads seq d_k", num_heads=self.num_heads)
-        K_multi = rearrange(K, "batch seq (num_heads d_k) -> batch num_heads seq d_k", num_heads=self.num_heads)
-        V_multi = rearrange(V, "batch seq (num_heads d_k) -> batch num_heads seq d_k", num_heads=self.num_heads)
-        scores = scaled_dot_product_attention(Q=Q_multi, K=K_multi, V=V_multi, mask=causal_mask)
+        Q = rearrange(Q, "batch seq (num_heads d_k) -> batch num_heads seq d_k", num_heads=self.num_heads)
+        K = rearrange(K, "batch seq (num_heads d_k) -> batch num_heads seq d_k", num_heads=self.num_heads)
+        V = rearrange(V, "batch seq (num_heads d_k) -> batch num_heads seq d_k", num_heads=self.num_heads)
+        if self.rope is not None:
+            token_positions = torch.arange(seq_len, device=x.device)
+            Q = self.rope(x=Q, token_positions=token_positions)
+            K = self.rope(x=K, token_positions=token_positions)
+        scores = scaled_dot_product_attention(Q=Q, K=K, V=V, mask=causal_mask)
         multihead = rearrange(scores, "batch num_heads seq d_k -> batch seq (num_heads d_k)")
         return self.W_o(multihead)
