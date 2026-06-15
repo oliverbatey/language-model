@@ -24,6 +24,8 @@ from language_model.functions import (
     softmax
 )
 
+from language_model.model import TransformerLM
+
 
 def run_linear(
     d_in: int,
@@ -402,7 +404,34 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        num_layers=num_layers,
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        theta=rope_theta,
+    )
+    state_dict = {
+        "embedding.embedding_matrix": weights["token_embeddings.weight"],
+        "norm.gain": weights["ln_final.weight"],
+        "linear.W": weights["lm_head.weight"],
+    }
+    for i in range(num_layers):
+        p = f"layers.{i}"
+        W_qkv = torch.cat([weights[f"{p}.attn.q_proj.weight"], weights[f"{p}.attn.k_proj.weight"], weights[f"{p}.attn.v_proj.weight"]], dim=0)
+        state_dict.update({
+            f"transformer_blocks.{i}.mha.W_qkv.W": W_qkv,
+            f"transformer_blocks.{i}.mha.W_o.W": weights[f"{p}.attn.output_proj.weight"],
+            f"transformer_blocks.{i}.norm_1.gain": weights[f"{p}.ln1.weight"],
+            f"transformer_blocks.{i}.norm_2.gain": weights[f"{p}.ln2.weight"],
+            f"transformer_blocks.{i}.swiglu.W1.W": weights[f"{p}.ffn.w1.weight"],
+            f"transformer_blocks.{i}.swiglu.W2.W": weights[f"{p}.ffn.w2.weight"],
+            f"transformer_blocks.{i}.swiglu.W3.W": weights[f"{p}.ffn.w3.weight"],
+        })
+    model.load_state_dict(state_dict)
+    return model(in_indices)
 
 
 def run_rmsnorm(
