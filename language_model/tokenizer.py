@@ -1,5 +1,6 @@
 import heapq
 import os
+import pickle
 import cProfile
 import regex as re
 
@@ -654,19 +655,29 @@ def train_bpe(
 
 
 if __name__ == "__main__":
-    path = "data/TinyStoriesV2-GPT4-valid.txt"
-    #path = "cs336_basics/assets/smallcorpus.txt"
-    vocab_size=1000
+    path = "data/TinyStoriesV2-GPT4-train.txt"
+    dataset_name="tinystories"
+    vocab_size=10000
+
     special_tokens = ["<|endoftext|>"]
     pretoken_counts = build_pretoken_counts(path=path, special_tokens=special_tokens)
+
+    vocab_pickle_name = f"{dataset_name}_{vocab_size}_vocab.pkl"
+    merges_pickle_name = f"{dataset_name}_{vocab_size}_merges.pkl"
+    vocab, merges = train_bpe(path=path, vocab_size=vocab_size, special_tokens=special_tokens)
+
+    with open(vocab_pickle_name, "wb") as f:
+        pickle.dump(vocab, f, protocol=pickle.HIGHEST_PROTOCOL)
+    
+    with open(merges_pickle_name, "wb") as f:
+        pickle.dump(merges, f, protocol=pickle.HIGHEST_PROTOCOL)
+
     # register = TokenSequenceRegister(pretoken_counts, special_tokens)
     # sequence_weights = register.sequence_weights
     # sequence_tokens = register.sequence_tokens
     # pair_counts = register.pair_counts
     # pair_occurrences = register.pair_occurrences
-
-
-    cProfile.run(
-        "train_bpe(path, vocab_size, special_tokens)",
-        sort="cumtime",
-    )
+    # cProfile.run(
+    #     "train_bpe(path, vocab_size, special_tokens)",
+    #     sort="cumtime",
+    # )
