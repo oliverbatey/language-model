@@ -8,7 +8,6 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-from einops import rearrange
 
 from language_model.tokenizer import Tokenizer, train_bpe
 from language_model.layers import (
@@ -16,8 +15,9 @@ from language_model.layers import (
     Linear,
     MultiHeadSelfAttention,
     RMSNorm,
+    RotaryPositionalEmbedding,
     SwiGLU,
-    RotaryPositionalEmbedding
+    Transformer
 )
 from language_model.functions import (
     scaled_dot_product_attention,
@@ -306,7 +306,21 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+
+    layer = Transformer(
+        d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_len=max_seq_len, theta=theta
+    )
+    W_qkv = torch.cat([weights["attn.q_proj.weight"], weights["attn.k_proj.weight"], weights["attn.v_proj.weight"]], dim=0)
+    layer.load_state_dict({
+        "mha.W_qkv.W": W_qkv,
+        "mha.W_o.W": weights["attn.output_proj.weight"],
+        "norm_1.gain": weights["ln1.weight"],
+        "norm_2.gain": weights["ln2.weight"],
+        "swiglu.W1.W": weights["ffn.w1.weight"],
+        "swiglu.W2.W": weights["ffn.w2.weight"],
+        "swiglu.W3.W": weights["ffn.w3.weight"],
+    })
+    return layer(in_features)
 
 
 def run_transformer_lm(

@@ -164,3 +164,35 @@ class MultiHeadSelfAttention(torch.nn.Module):
         scores = scaled_dot_product_attention(Q=Q, K=K, V=V, mask=causal_mask)
         multihead = rearrange(scores, "batch num_heads seq d_k -> batch seq (num_heads d_k)")
         return self.W_o(multihead)
+
+class Transformer(torch.nn.Module):
+    def __init__(
+            self,
+            d_model: int,
+            num_heads: int,
+            d_ff: int,
+            max_seq_len: int | None = None,
+            theta: float | None = None, 
+            eps: float | None = None,
+            device: torch.device | None = None,
+        ):
+        super().__init__()
+        norm_kwargs = {"d_model": d_model, "device": device}
+        if eps is not None:
+            norm_kwargs["eps"] = eps
+
+        self.norm_1 = RMSNorm(**norm_kwargs)
+        self.norm_2 = RMSNorm(**norm_kwargs)
+        self.swiglu = SwiGLU(d_in=d_model, d_ff=d_ff)
+        self.mha = MultiHeadSelfAttention(
+            d_model=d_model,
+            num_heads=num_heads,
+            max_seq_len=max_seq_len,
+            theta=theta,
+            device=device
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.mha(self.norm_1(x))
+        x = x + self.swiglu(self.norm_2(x))
+        return x
